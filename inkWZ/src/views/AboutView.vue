@@ -5,6 +5,9 @@
 import { onMounted } from 'vue';
 import * as THREE from 'three';
 import * as GeoTIFF from "geotiff";
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { createControls } from './controls/controls'
+import { CameraControl } from './controls/keywordControls'
 // import setupTerrainModel from './TerrainControl/terrainControl'
 import * as dat from 'lil-gui'
 console.log(123)
@@ -24,14 +27,11 @@ onMounted(() => {
     height: 600
   }
   // TEXT
-  // const material = new THREE.MeshMatcapMaterial({})
-  // const text = new THREE.Mesh(textGeometry, textMaterial);
-  // for(let i=0; i < 100; i++){
 
-  // }
   // Light 
   const ambientLight = new THREE.AmbientLight("#fff", 1);
   scene.add(ambientLight);
+
   // 红色的正方形
   const geometry = new THREE.BoxGeometry(1, 1, 1);
   const material = new THREE.MeshBasicMaterial({
@@ -39,12 +39,17 @@ onMounted(() => {
   })
   const mesh1 = new THREE.Mesh(geometry, material);
   scene.add(mesh1);
+
   // camera
-  const camera = new THREE.PerspectiveCamera(150, sizes.width / sizes.height)
-  camera.position.z = 600;
-  camera.position.x = 100;
-  camera.position.y = 600;
-  // camera.lookAt(mesh1.position);
+  const cameraPosition = {
+    x: 100,
+    y: 600,
+    z: 600
+  }
+  const cameraControl = new CameraControl(cameraPosition, 150, sizes.width / sizes.height);
+  const camera = cameraControl.camera;
+  console.log(camera, 'camera');
+  camera.lookAt(mesh1.position);
   scene.add(camera);
 
 
@@ -52,18 +57,18 @@ onMounted(() => {
     canvas: canvas
   })
 
+  var control = createControls(camera, renderer.domElement);
+  control.target.set(0, 0, 0);
   /**
    * 
    */
   const readGeoTif = async () => {
     const rawTiff = await GeoTIFF.fromUrl("./平原区dem.tif");
     const tifImage = await rawTiff.getImage();
-    console.log('tifImage', tifImage)
     const image = {
       width: tifImage.getWidth(),
       height: tifImage.getHeight()
     }
-    console.log('image', image);
     const geometry = new THREE.PlaneGeometry(
       image.width,
       image.height,
@@ -74,8 +79,11 @@ onMounted(() => {
     const vertices = geometry.attributes.position.array;
     const data = await tifImage.readRasters({ interleave: true });
     for (let i = 0, j = 0, l = vertices.length; i < l; i++, j += 3) {
-
-      vertices[j + 1] = data[i] * 10;
+      if (!isNaN(data[i]) && data[i] > -10) {
+        vertices[j + 1] = data[i];
+      } else {
+        vertices[j + 1] = 0;
+      }
 
     }
     const texture = new THREE.CanvasTexture(generateTexture(data, image.width, image.height));
@@ -84,9 +92,9 @@ onMounted(() => {
     texture.colorSpace = THREE.SRGBColorSpace;
 
     const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ map: texture }));
+
     scene.add(mesh);
-    camera.lookAt(10,10,10)
-    const posAttr = geometry.attributes.position;
+    // camera.lookAt(10, 10, 10)
     // Fill z values of the geometry
     console.time("parseGeom");
     // console.log('data', data)
@@ -128,6 +136,7 @@ onMounted(() => {
     renderer.render(scene, camera);
     console.timeEnd("parseGeom");
   };
+
   function generateTexture(data, width, height) {
 
     // bake lighting into texture
@@ -159,9 +168,9 @@ onMounted(() => {
 
       shade = vector3.dot(sun);
 
-      imageData[i] = (96 + shade * 128) * (0.5 + data[j] * 0.007);
-      imageData[i + 1] = (32 + shade * 96) * (0.5 + data[j] * 0.007);
-      imageData[i + 2] = (shade * 96) * (0.5 + data[j] * 0.007);
+      imageData[i] = (90 + shade * 128) * (0.5 + data[j] * 0.007);
+      imageData[i + 1] = (115 + shade * 96) * (0.5 + data[j] * 0.007);
+      imageData[i + 2] = (116 + shade * 96) * (0.5 + data[j] * 0.007);
 
     }
 
@@ -191,13 +200,13 @@ onMounted(() => {
   }
   // 2. 计算每个顶点的颜色值
   // 创建底部网格，使用平面Geometry和材质MeshBasicMaterial
-  const gridGeometry = new THREE.PlaneGeometry(10000, 10000); // 创建一个100x100的平面
-  const gridMaterial = new THREE.MeshBasicMaterial({ color: 0xcccccc, side: THREE.DoubleSide }); // 创建材质，双面显示，颜色为灰色
-  const grid = new THREE.Mesh(gridGeometry, gridMaterial);
+  // const gridGeometry = new THREE.PlaneGeometry(10000, 10000); // 创建一个100x100的平面
+  // const gridMaterial = new THREE.MeshBasicMaterial({ color: 0xcccccc, side: THREE.DoubleSide }); // 创建材质，双面显示，颜色为灰色
+  // const grid = new THREE.Mesh(gridGeometry, gridMaterial);
 
-  // 将底部网格放置在地面位置
-  grid.position.set(0, -10, 0); // 将平面放置在y轴-10的位置，以模拟底部
-  scene.add(grid);
+  // // 将底部网格放置在地面位置
+  // grid.position.set(0, -10, 0); // 将平面放置在y轴-10的位置，以模拟底部
+  // scene.add(grid);
   readGeoTif();
 
   // 鼠标控制摄像头
@@ -232,7 +241,28 @@ onMounted(() => {
   // setupTerrainModel()
   renderer.setSize(canvasSizes.width, canvasSizes.height)
   renderer.render(scene, camera);
+    // 移动监听
+    function move() {
+    document.addEventListener('keydown', function (event) {
+      const key = event.key; // 获取按下的键
+      console.log(key, 'key');
+      switch (key) {
+        case 'w': cameraControl.forward(); break;
+        case 's': cameraControl.backward(); break;
+        case 'a': cameraControl.turnLeft(0.1); break;
+        case 'd': cameraControl.turnRight(0.1); break;
+      }
+      renderer.render(scene, camera);
+    });
 
+  }
+  move();
+  function animate() {
+    requestAnimationFrame(animate);
+    renderer.render(scene, camera);
+    control.update(); // 更新controls
+  }
+  animate();
 })
 </script>
 
